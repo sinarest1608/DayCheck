@@ -4,14 +4,39 @@ import HealthKit
 
 struct ContentView: View {
     @State private var healthManager = HealthKitManager()
+    @State private var historyStore = HistoryStore()
+
+    private enum Field: Hashable {
+        case weight, water, steps
+    }
 
     @State private var date = Date()
-    @State private var weightKg: Double = 0
-    @State private var waterLiters: Double = 0
-    @State private var steps: Double = 0
+    // Backed by Strings, not Double, so the fields can be typed into freely —
+    // a `TextField(value:format:)` reformats on every keystroke and resets the
+    // cursor to the start, turning e.g. "2.5" into garbage like "2.50.0".
+    @State private var weightText = "0.0"
+    @State private var waterText = "0.0"
+    @State private var stepsText = "0"
     @State private var supplementsTaken = false
     @State private var chamomileTea = false
     @State private var dietPercent: Int = 100
+    @FocusState private var focusedField: Field?
+
+    private var weightKg: Double { Double(weightText) ?? 0 }
+    private var waterLiters: Double { Double(waterText) ?? 0 }
+    private var steps: Double { Double(stepsText) ?? 0 }
+
+    private var weightKgStepperBinding: Binding<Double> {
+        Binding(get: { weightKg }, set: { weightText = String(format: "%.1f", $0) })
+    }
+
+    private var waterLitersStepperBinding: Binding<Double> {
+        Binding(get: { waterLiters }, set: { waterText = String(format: "%.1f", $0) })
+    }
+
+    private var stepsStepperBinding: Binding<Double> {
+        Binding(get: { steps }, set: { stepsText = String(Int($0)) })
+    }
 
     @AppStorage("waterGoalLiters") private var waterGoalLiters: Double = 3.0
     @AppStorage("stepsGoal") private var stepsGoal: Int = 10_000
@@ -29,6 +54,7 @@ struct ContentView: View {
 
     @State private var isShowingShareSheet = false
     @State private var isRefreshingHealth = false
+    @State private var hasFetchedInitialHealthData = false
 
     private var entry: StatusEntry {
         StatusEntry(
@@ -56,11 +82,12 @@ struct ContentView: View {
                     HStack {
                         Text("Weight (Kg)")
                         Spacer()
-                        TextField("", value: $weightKg, format: .number.precision(.fractionLength(1)))
+                        TextField("", text: $weightText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 60)
-                        Stepper("", value: $weightKg, in: 0...300, step: 0.1)
+                            .focused($focusedField, equals: .weight)
+                        Stepper("", value: weightKgStepperBinding, in: 0...300, step: 0.1)
                             .labelsHidden()
                     }
 
@@ -68,11 +95,12 @@ struct ContentView: View {
                     HStack {
                         Text("Water (L)")
                         Spacer()
-                        TextField("", value: $waterLiters, format: .number.precision(.fractionLength(1)))
+                        TextField("", text: $waterText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 60)
-                        Stepper("", value: $waterLiters, in: 0...15, step: 0.1)
+                            .focused($focusedField, equals: .water)
+                        Stepper("", value: waterLitersStepperBinding, in: 0...15, step: 0.1)
                             .labelsHidden()
                     }
 
@@ -80,11 +108,12 @@ struct ContentView: View {
                     HStack {
                         Text("Steps")
                         Spacer()
-                        TextField("", value: $steps, format: .number.precision(.fractionLength(0)))
+                        TextField("", text: $stepsText)
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 70)
-                        Stepper("", value: $steps, in: 0...100_000, step: 500)
+                            .focused($focusedField, equals: .steps)
+                        Stepper("", value: stepsStepperBinding, in: 0...100_000, step: 500)
                             .labelsHidden()
                     }
 
@@ -167,7 +196,18 @@ struct ContentView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Daily Status")
+            .navigationDestination(for: HistoryRoute.self) { _ in
+                HistoryView(historyStore: historyStore)
+            }
+            .navigationDestination(for: Date.self) { weekStart in
+                WeekDetailView(historyStore: historyStore, weekStart: weekStart)
+            }
             .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    NavigationLink(value: HistoryRoute()) {
+                        Label("History", systemImage: "calendar")
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         UIPasteboard.general.string = entry.message
@@ -180,6 +220,7 @@ struct ContentView: View {
             .sheet(isPresented: $isShowingShareSheet) {
                 ShareSheet(text: entry.message, images: selectedImages) { completed in
                     if completed {
+                        historyStore.save(DailyRecord(from: entry))
                         resetForm()
                     }
                 }
@@ -199,7 +240,16 @@ struct ContentView: View {
                     )
                 }
             }
-            .onAppear { refreshFromHealth() }
+            .onDisappear { focusedField = nil }
+            .onAppear {
+                // `.onAppear` also fires every time this screen is uncovered again
+                // (e.g. popping back from History), not just on first launch. Without
+                // this guard, every trip to History and back re-did a full HealthKit
+                // round trip for no reason — the actual lag the user was seeing.
+                guard !hasFetchedInitialHealthData else { return }
+                hasFetchedInitialHealthData = true
+                refreshFromHealth()
+            }
             .onChange(of: date) { refreshFromHealth() }
             .onChange(of: weightSourceBundleID) { refreshFromHealth() }
             .onChange(of: waterSourceBundleID) { refreshFromHealth() }
@@ -247,7 +297,7 @@ struct ContentView: View {
                 date: date,
                 sourceBundleID: weightBundleID
             ) {
-                weightKg = latest
+                weightText = String(format: "%.1f", latest)
             }
 
             if let total = await healthManager.total(
@@ -256,7 +306,7 @@ struct ContentView: View {
                 date: date,
                 sourceBundleID: waterBundleID
             ) {
-                waterLiters = total
+                waterText = String(format: "%.1f", total)
             }
 
             if let total = await healthManager.total(
@@ -265,7 +315,7 @@ struct ContentView: View {
                 date: date,
                 sourceBundleID: stepsBundleID
             ) {
-                steps = total
+                stepsText = String(Int(total))
             }
         }
     }
@@ -274,9 +324,9 @@ struct ContentView: View {
     /// Goals and source preferences (`@AppStorage`) are left alone since they're settings, not daily data.
     private func resetForm() {
         date = Date()
-        weightKg = 0
-        waterLiters = 0
-        steps = 0
+        weightText = "0.0"
+        waterText = "0.0"
+        stepsText = "0"
         supplementsTaken = false
         chamomileTea = false
         dietPercent = 100

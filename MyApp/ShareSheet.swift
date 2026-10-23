@@ -20,7 +20,14 @@ struct ShareSheet: UIViewControllerRepresentable {
         let controller = UIActivityViewController(activityItems: [text] + imageURLs, applicationActivities: nil)
         controller.completionWithItemsHandler = { _, completed, _, _ in
             Self.cleanUp(imageURLs)
-            onComplete(completed)
+            // Deferred past the current run loop tick: this handler fires while
+            // the sheet is still mid-dismissal, and `onComplete` goes on to
+            // mutate a lot of SwiftUI state (resetForm + a new HealthKit fetch).
+            // Doing that synchronously here fights the sheet's own dismiss
+            // animation and is what was causing the hang after sharing.
+            DispatchQueue.main.async {
+                onComplete(completed)
+            }
         }
         // No-op on iPhone; avoids a crash on iPad, which requires a popover anchor.
         if let popover = controller.popoverPresentationController {
