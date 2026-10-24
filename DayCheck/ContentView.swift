@@ -5,6 +5,7 @@ import HealthKit
 struct ContentView: View {
     @State private var healthManager = HealthKitManager()
     @State private var historyStore = HistoryStore()
+    @State private var dietPlanStore = DietPlanStore()
 
     private enum Field: Hashable {
         case weight, water, steps
@@ -19,8 +20,16 @@ struct ContentView: View {
     @State private var stepsText = "0"
     @State private var supplementsTaken = false
     @State private var chamomileTea = false
-    @State private var dietPercent: Int = 100
+    @State private var checkedDietItemIDs: Set<UUID> = []
     @FocusState private var focusedField: Field?
+
+    /// Checked/total items from `dietPlanStore`, not a manual guess.
+    private var dietPercent: Int {
+        let total = dietPlanStore.meals.flatMap(\.items).count
+        guard total > 0 else { return 100 }
+        let checked = dietPlanStore.meals.flatMap(\.items).filter { checkedDietItemIDs.contains($0.id) }.count
+        return Int((Double(checked) / Double(total) * 100).rounded())
+    }
 
     private var weightKg: Double { Double(weightText) ?? 0 }
     private var waterLiters: Double { Double(waterText) ?? 0 }
@@ -144,8 +153,13 @@ struct ContentView: View {
                 Section("Habits") {
                     Toggle("Supplements", isOn: $supplementsTaken)
                     Toggle("Chamomile Tea", isOn: $chamomileTea)
-                    Stepper(value: $dietPercent, in: 0...100, step: 5) {
-                        Text("Diet \(dietPercent)%")
+                    NavigationLink(value: DietRoute()) {
+                        HStack {
+                            Text("Diet")
+                            Spacer()
+                            Text("\(dietPercent)%")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -202,6 +216,9 @@ struct ContentView: View {
             .navigationDestination(for: Date.self) { weekStart in
                 WeekDetailView(historyStore: historyStore, weekStart: weekStart)
             }
+            .navigationDestination(for: DietRoute.self) { _ in
+                DietChecklistView(dietPlanStore: dietPlanStore, checkedItemIDs: $checkedDietItemIDs)
+            }
             .toolbar {
                 ToolbarItem(placement: .navigation) {
                     NavigationLink(value: HistoryRoute()) {
@@ -248,6 +265,7 @@ struct ContentView: View {
                 // round trip for no reason — the actual lag the user was seeing.
                 guard !hasFetchedInitialHealthData else { return }
                 hasFetchedInitialHealthData = true
+                checkedDietItemIDs = dietPlanStore.allItemIDs
                 refreshFromHealth()
             }
             .onChange(of: date) { refreshFromHealth() }
@@ -329,7 +347,7 @@ struct ContentView: View {
         stepsText = "0"
         supplementsTaken = false
         chamomileTea = false
-        dietPercent = 100
+        checkedDietItemIDs = dietPlanStore.allItemIDs
         photosPickerItems = []
         selectedImages = []
         refreshFromHealth()
