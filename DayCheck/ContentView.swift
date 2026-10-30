@@ -20,6 +20,7 @@ struct ContentView: View {
     @State private var stepsText = "0"
     @State private var supplementsTaken = false
     @State private var chamomileTea = false
+    @State private var workoutDone = false
     @State private var checkedDietItemIDs: Set<UUID> = []
     @FocusState private var focusedField: Field?
 
@@ -52,10 +53,12 @@ struct ContentView: View {
     @AppStorage("weightSourceBundleID") private var weightSourceBundleID: String = ""
     @AppStorage("waterSourceBundleID") private var waterSourceBundleID: String = ""
     @AppStorage("stepsSourceBundleID") private var stepsSourceBundleID: String = ""
+    @AppStorage("workoutSourceBundleID") private var workoutSourceBundleID: String = ""
 
     @State private var weightSources: [HKSource] = []
     @State private var waterSources: [HKSource] = []
     @State private var stepSources: [HKSource] = []
+    @State private var workoutSources: [HKSource] = []
 
     @State private var photosPickerItems: [PhotosPickerItem] = []
     @State private var selectedImages: [UIImage] = []
@@ -75,6 +78,7 @@ struct ContentView: View {
             stepsGoal: Double(stepsGoal),
             supplementsTaken: supplementsTaken,
             chamomileTea: chamomileTea,
+            workoutDone: workoutDone,
             dietPercent: dietPercent
         )
     }
@@ -125,6 +129,9 @@ struct ContentView: View {
                         Stepper("", value: stepsStepperBinding, in: 0...100_000, step: 500)
                             .labelsHidden()
                     }
+
+                    sourcePicker("Workout source", selection: $workoutSourceBundleID, sources: workoutSources)
+                    Toggle("Workout", isOn: $workoutDone)
 
                     Button {
                         refreshFromHealth()
@@ -272,6 +279,7 @@ struct ContentView: View {
             .onChange(of: weightSourceBundleID) { refreshFromHealth() }
             .onChange(of: waterSourceBundleID) { refreshFromHealth() }
             .onChange(of: stepsSourceBundleID) { refreshFromHealth() }
+            .onChange(of: workoutSourceBundleID) { refreshFromHealth() }
             .onChange(of: photosPickerItems) { loadSelectedImages() }
         }
     }
@@ -301,13 +309,16 @@ struct ContentView: View {
             async let fetchedWeightSources = healthManager.sources(for: HealthKitManager.weightType)
             async let fetchedWaterSources = healthManager.sources(for: HealthKitManager.waterType)
             async let fetchedStepSources = healthManager.sources(for: HealthKitManager.stepCountType)
+            async let fetchedWorkoutSources = healthManager.workoutSources()
             weightSources = await fetchedWeightSources
             waterSources = await fetchedWaterSources
             stepSources = await fetchedStepSources
+            workoutSources = await fetchedWorkoutSources
 
             let weightBundleID = weightSourceBundleID.isEmpty ? nil : weightSourceBundleID
             let waterBundleID = waterSourceBundleID.isEmpty ? nil : waterSourceBundleID
             let stepsBundleID = stepsSourceBundleID.isEmpty ? nil : stepsSourceBundleID
+            let workoutBundleID = workoutSourceBundleID.isEmpty ? nil : workoutSourceBundleID
 
             if let latest = await healthManager.latestSample(
                 for: HealthKitManager.weightType,
@@ -335,6 +346,10 @@ struct ContentView: View {
             ) {
                 stepsText = String(Int(total))
             }
+
+            if let had = await healthManager.hadWorkout(date: date, sourceBundleID: workoutBundleID) {
+                workoutDone = had
+            }
         }
     }
 
@@ -347,6 +362,7 @@ struct ContentView: View {
         stepsText = "0"
         supplementsTaken = false
         chamomileTea = false
+        workoutDone = false
         checkedDietItemIDs = dietPlanStore.allItemIDs
         photosPickerItems = []
         selectedImages = []

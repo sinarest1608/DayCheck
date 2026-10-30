@@ -9,6 +9,7 @@ struct StatusEntry {
     var stepsGoal: Double = 10_000
     var supplementsTaken: Bool = false
     var chamomileTea: Bool = false
+    var workoutDone: Bool = false
     var dietPercent: Int = 100
 
     var message: String {
@@ -16,6 +17,7 @@ struct StatusEntry {
         let stepsMark = steps >= stepsGoal ? "✅" : "❌"
         let supplementsMark = supplementsTaken ? "✅" : "❌"
         let chamomileMark = chamomileTea ? "✅" : "❌"
+        let workoutMark = workoutDone ? "✅" : "❌"
         let dietMark = dietPercent >= 100 ? "💯" : "\(dietPercent)%"
 
         return [
@@ -25,6 +27,7 @@ struct StatusEntry {
             "Steps - \(formattedSteps) \(stepsMark)",
             "Supplements \(supplementsMark)",
             "Chamomile Tea \(chamomileMark)",
+            "Workout \(workoutMark)",
             "Diet \(dietMark)",
         ].joined(separator: "\n")
     }

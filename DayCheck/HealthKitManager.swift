@@ -6,14 +6,46 @@ final class HealthKitManager {
     static let stepCountType = HKQuantityType(.stepCount)
     static let waterType = HKQuantityType(.dietaryWater)
     static let weightType = HKQuantityType(.bodyMass)
+    static let workoutType = HKObjectType.workoutType()
 
     let isAvailable = HKHealthStore.isHealthDataAvailable()
     private let store = HKHealthStore()
 
     func requestAuthorization() async {
         guard isAvailable else { return }
-        let readTypes: Set<HKObjectType> = [Self.stepCountType, Self.waterType, Self.weightType]
+        let readTypes: Set<HKObjectType> = [Self.stepCountType, Self.waterType, Self.weightType, Self.workoutType]
         try? await store.requestAuthorization(toShare: [], read: readTypes)
+    }
+
+    /// Apps and devices (e.g. "Hevy") that have logged workouts.
+    func workoutSources() async -> [HKSource] {
+        guard isAvailable else { return [] }
+        let descriptor = HKSourceQueryDescriptor(predicate: .workout())
+        let sources = (try? await descriptor.result(for: store)) ?? []
+        return sources.sorted { $0.name < $1.name }
+    }
+
+    /// Whether any workout was logged on the calendar day containing `date`.
+    /// Pass `nil` for `sourceBundleID` to consider workouts from any source.
+    func hadWorkout(date: Date, sourceBundleID: String?) async -> Bool? {
+        guard isAvailable else { return nil }
+
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: date)
+        guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else { return nil }
+        var predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: endOfDay)
+
+        if let sourceBundleID {
+            let matchingSources = await workoutSources().filter { $0.bundleIdentifier == sourceBundleID }
+            guard !matchingSources.isEmpty else { return nil }
+            let sourcePredicate = HKQuery.predicateForObjects(from: Set(matchingSources))
+            predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [predicate, sourcePredicate])
+        }
+
+        let samplePredicate = HKSamplePredicate.workout(predicate)
+        let descriptor = HKSampleQueryDescriptor(predicates: [samplePredicate], sortDescriptors: [], limit: 1)
+        guard let results = try? await descriptor.result(for: store) else { return nil }
+        return !results.isEmpty
     }
 
     /// Apps and devices (e.g. "Zepp", "iPhone") that have written samples of this type.
